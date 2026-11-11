@@ -11,6 +11,9 @@ const OLD_CHARACTERS: [&str; 3] = ["mochi", "meo-muop", "gau-bo"];
 pub const SIZE_FACTORS: [f32; 3] = [0.75, 1.0, 1.25];
 /// Wheel zoom never goes below this; the top is wherever the character fills the screen.
 pub const MIN_ZOOM: f32 = 0.5;
+/// The skills' keys, in config.json under these names: Q teleport, W clones, R full screen.
+pub const SKILL_NAMES: [&str; 3] = ["blink", "clones", "ultimate"];
+pub const DEFAULT_SKILL_KEYS: [u8; 3] = [b'Q', b'W', b'R'];
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Config {
@@ -41,6 +44,8 @@ pub struct Config {
     pub auto_clone_secs: u32,
     /// Install new releases by itself.
     pub auto_update: bool,
+    /// The letter or digit each skill is pressed with, as in SKILL_NAMES; 0 leaves that skill to the menu.
+    pub skill_keys: [u8; 3],
 }
 
 impl Default for Config {
@@ -62,6 +67,7 @@ impl Default for Config {
             auto_skills: None,
             auto_clone_secs: 20,
             auto_update: true,
+            skill_keys: DEFAULT_SKILL_KEYS,
         }
     }
 }
@@ -76,6 +82,8 @@ pub enum Setting {
     AutoHide,
     Translucent,
     AutoUpdate,
+    /// Skills going off by themselves as the sessions change; Windows only so far.
+    AutoSkills,
     Size(u8),
     /// 0 follows the system, 1 Vietnamese, 2 English.
     Language(u8),
@@ -94,6 +102,8 @@ pub struct SettingsView {
     pub auto_update: bool,
     pub size: u8,
     pub language: u8,
+    pub auto_skills: bool,
+    pub skill_keys: [u8; 3],
 }
 
 pub fn dir() -> PathBuf {
@@ -147,7 +157,25 @@ fn parse(text: &str) -> Config {
         auto_skills: j.get("autoSkills").and_then(Value::as_bool),
         auto_clone_secs: j.get("autoCloneSeconds").and_then(Value::as_u64).map_or(d.auto_clone_secs, |s| s.clamp(1, 3600) as u32),
         auto_update: flag("autoUpdate", d.auto_update),
+        skill_keys: skill_keys(j.get("skillKeys")),
     }
+}
+
+/// One letter or digit each; "" turns a skill's key off. Anything else keeps the usual key, and a key
+/// already taken by an earlier skill is left off rather than doing two things at once.
+fn skill_keys(v: Option<&Value>) -> [u8; 3] {
+    let mut keys = DEFAULT_SKILL_KEYS;
+    for (i, name) in SKILL_NAMES.iter().enumerate() {
+        match v.and_then(|v| v.get(name)).and_then(Value::as_str).map(str::trim) {
+            Some("") => keys[i] = 0,
+            Some(s) if s.len() == 1 && s.as_bytes()[0].is_ascii_alphanumeric() => keys[i] = s.as_bytes()[0].to_ascii_uppercase(),
+            _ => {}
+        }
+        if keys[i] != 0 && keys[..i].contains(&keys[i]) {
+            keys[i] = 0;
+        }
+    }
+    keys
 }
 
 fn serialize(c: &Config) -> String {
@@ -166,6 +194,8 @@ fn serialize(c: &Config) -> String {
         "language": c.language,
         "autoCloneSeconds": c.auto_clone_secs,
         "autoUpdate": c.auto_update,
+        // Always written, so the file shows what can be changed.
+        "skillKeys": SKILL_NAMES.iter().zip(c.skill_keys).map(|(n, k)| (n.to_string(), json!(if k == 0 { String::new() } else { (k as char).to_string() }))).collect::<serde_json::Map<_, _>>(),
     });
     if let Some(on) = c.auto_skills {
         j["autoSkills"] = json!(on);
@@ -199,10 +229,20 @@ mod tests {
 
     #[test]
     fn round_trips() {
-        let c = Config { port: 5000, position: Some((-20, 300)), muted: true, toasts: false, character: "bear".into(), shift: -12.0, lift: 40.0, size: 2, zoom: 3.5, auto_hide: false, translucent: false, asked_hooks: true, language: "en".into(), auto_skills: Some(false), auto_clone_secs: 45, auto_update: false };
+        let c = Config { port: 5000, position: Some((-20, 300)), muted: true, toasts: false, character: "bear".into(), shift: -12.0, lift: 40.0, size: 2, zoom: 3.5, auto_hide: false, translucent: false, asked_hooks: true, language: "en".into(), auto_skills: Some(false), auto_clone_secs: 45, auto_update: false, skill_keys: [b'A', 0, b'7'] };
         assert_eq!(parse(&serialize(&c)), c);
         let c = Config { auto_skills: None, ..c };
         assert_eq!(parse(&serialize(&c)), c);
+    }
+
+    #[test]
+    fn skill_keys_take_one_letter_or_digit_each() {
+        assert_eq!(parse("{}").skill_keys, DEFAULT_SKILL_KEYS);
+        assert_eq!(parse(r#"{"skillKeys":{"blink":"a","clones":"","ultimate":"5"}}"#).skill_keys, [b'A', 0, b'5']);
+        // Too long, not a letter, or not text: the usual key stays.
+        assert_eq!(parse(r#"{"skillKeys":{"blink":"F1","clones":"!","ultimate":3}}"#).skill_keys, DEFAULT_SKILL_KEYS);
+        // Taken by an earlier skill: off, not two skills on one key.
+        assert_eq!(parse(r#"{"skillKeys":{"blink":"W"}}"#).skill_keys, [b'W', 0, b'R']);
     }
 
     #[test]

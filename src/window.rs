@@ -83,8 +83,9 @@ const FULL_SNAP: f32 = 0.9;
 const MAX_SCREEN_SHARE: f32 = 0.6;
 /// The buddy never has the keyboard, so its skills are hotkeys: Ctrl+Alt+key anywhere, and plain Ctrl+key
 /// only while the pointer is on the buddy, so the rest of the time those stay with other apps (Ctrl+W
-/// closes their tabs, Ctrl+R reloads). Global ids count from 1, the hover ones from HOVER_HOTKEY.
-const SKILL_KEYS: [(Skill, u32); 3] = [(Skill::Blink, b'Q' as u32), (Skill::Clones, b'W' as u32), (Skill::Ultimate, b'R' as u32)];
+/// closes their tabs, Ctrl+R reloads). Global ids count from 1, the hover ones from HOVER_HOTKEY. The
+/// keys themselves are the user's, in config.skill_keys, in this order.
+const SKILLS: [Skill; 3] = [Skill::Blink, Skill::Clones, Skill::Ultimate];
 const HOVER_HOTKEY: i32 = 11;
 const TIMER_SKILL: usize = 9;
 const TIMER_COMBO: usize = 10;
@@ -368,22 +369,28 @@ enum Skill {
 
 fn skill_of_hotkey(id: i32) -> Option<Skill> {
     let i = if id >= HOVER_HOTKEY { id - HOVER_HOTKEY } else { id - 1 };
-    usize::try_from(i).ok().and_then(|i| SKILL_KEYS.get(i)).map(|k| k.0)
+    usize::try_from(i).ok().and_then(|i| SKILLS.get(i)).copied()
 }
 
-/// Taken by another app, a shortcut is simply missing; the menu still has every skill.
-fn register_skill_keys(hwnd: HWND, hover: bool) {
-    for (i, (_, key)) in SKILL_KEYS.iter().enumerate() {
+/// Taken by another app, a shortcut is simply missing; the menu still has every skill. A letter or digit's
+/// virtual-key code is its uppercase ASCII, so the configured keys go to Windows as they are.
+fn register_skill_keys(hwnd: HWND, hover: bool, keys: &[u8; 3]) {
+    for (i, key) in keys.iter().enumerate().filter(|(_, k)| **k != 0) {
         let (id, mods) = if hover { (HOVER_HOTKEY + i as i32, MOD_CONTROL) } else { (1 + i as i32, MOD_CONTROL | MOD_ALT) };
-        unsafe { RegisterHotKey(hwnd, id, mods | MOD_NOREPEAT, *key) };
+        unsafe { RegisterHotKey(hwnd, id, mods | MOD_NOREPEAT, *key as u32) };
     }
 }
 
 fn unregister_skill_keys(hwnd: HWND, hover: bool) {
     let base = if hover { HOVER_HOTKEY } else { 1 };
-    for i in 0..SKILL_KEYS.len() as i32 {
+    for i in 0..SKILLS.len() as i32 {
         unsafe { UnregisterHotKey(hwnd, base + i) };
     }
+}
+
+/// "\tCtrl+Q" for a menu item, or nothing when the skill has no key.
+fn key_hint(key: u8) -> String {
+    if key == 0 { String::new() } else { format!("\tCtrl+{}", key as char) }
 }
 
 /// A teleport under way.
@@ -808,7 +815,7 @@ impl App {
 
     fn use_skill(&mut self, s: Skill) {
         // Registering again is harmless: Windows just refuses the ones already there.
-        register_skill_keys(self.hwnd, true);
+        register_skill_keys(self.hwnd, true, &self.config.skill_keys);
         self.combo = true;
         unsafe { SetTimer(self.hwnd, TIMER_COMBO, COMBO_MS, None) };
         match s {
@@ -1769,9 +1776,10 @@ impl App {
             };
             add(m, CMD_TOGGLE, if self.visible { t("Ẩn Buddy", "Hide Buddy") } else { t("Hiện Buddy", "Show Buddy") }, false);
             // The keys as they work with the pointer on the buddy; anywhere else, with Alt too.
-            add(m, CMD_BLINK, t("Phi Lôi Thần\tCtrl+Q", "Flying Thunder God\tCtrl+Q"), false);
-            add(m, CMD_CLONES, t("Ảnh phân thân\tCtrl+W", "Shadow clones\tCtrl+W"), !self.bunshin.is_empty());
-            add(m, CMD_FULL, t("Phóng to\tCtrl+R", "Make it big\tCtrl+R"), self.full_restore.is_some());
+            let [kq, kw, kr] = self.config.skill_keys.map(key_hint);
+            add(m, CMD_BLINK, &(t("Phi Lôi Thần", "Flying Thunder God").to_string() + &kq), false);
+            add(m, CMD_CLONES, &(t("Ảnh phân thân", "Shadow clones").to_string() + &kw), !self.bunshin.is_empty());
+            add(m, CMD_FULL, &(t("Phóng to", "Make it big").to_string() + &kr), self.full_restore.is_some());
             add(m, CMD_AUTO_SKILLS, t("Tự dùng skill theo phiên", "Skills follow the sessions"), self.auto_skills_on());
             AppendMenuW(m, MF_SEPARATOR, 0, std::ptr::null());
             let chars = CreatePopupMenu();
@@ -1911,7 +1919,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
                     let mut t = TRACKMOUSEEVENT { cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32, dwFlags: TME_LEAVE, hwndTrack: hwnd, dwHoverTime: 0 };
                     TrackMouseEvent(&mut t);
                     a.tracking_leave = true;
-                    register_skill_keys(hwnd, true);
+                    register_skill_keys(hwnd, true, &a.config.skill_keys);
                 }
                 if let Some(d) = &mut a.drag {
                     let mut p = POINT { x: 0, y: 0 };
@@ -2336,9 +2344,9 @@ pub fn run() {
             a.add_tray();
             a.apply_character();
             a.refresh();
+            register_skill_keys(hwnd, false, &a.config.skill_keys);
         });
         ShowWindow(hwnd, SW_SHOWNOACTIVATE);
-        register_skill_keys(hwnd, false);
         SetTimer(hwnd, TIMER_HOUSEKEEPING, HOUSEKEEPING_MS, None);
         // Alt+Tab and the taskbar's previews hide every other window for a moment, which would make it blink.
         let excluded: i32 = 1;
@@ -2401,12 +2409,15 @@ pub fn settings_view() -> Option<SettingsView> {
             "en" => 2,
             _ => 0,
         },
+        auto_skills: a.auto_skills_on(),
+        skill_keys: a.config.skill_keys,
     })
 }
 
 pub fn apply_setting(s: Setting) {
     with_app(|a| match s {
         Setting::Hooks => a.on_command(CMD_HOOKS),
+        Setting::AutoSkills => a.on_command(CMD_AUTO_SKILLS),
         Setting::Sound => a.on_command(CMD_MUTE),
         Setting::Toasts => a.on_command(CMD_TOASTS),
         Setting::Autostart => a.on_command(CMD_AUTOSTART),

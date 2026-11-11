@@ -206,6 +206,9 @@ struct Picker {
     preview_state: usize,
     sort_by_name: bool,
     scroll: f32,
+    /// The settings page's own, once its rows outgrow a small window, and how far it can go.
+    settings_scroll: f32,
+    settings_max: f32,
     hits: Vec<Hit>,
     hover: Option<Action>,
     tracking: bool,
@@ -282,6 +285,8 @@ pub fn open(page: u8) {
         preview_state: 0,
         sort_by_name: false,
         scroll: 0.0,
+        settings_scroll: 0.0,
+        settings_max: 0.0,
         hits: Vec::new(),
         hover: None,
         tracking: false,
@@ -442,14 +447,16 @@ impl Picker {
         let (lw, lh) = (w as f32 / self.scale, h as f32 / self.scale);
         let content = lw - SIDEBAR_W;
         if self.page == PAGE_USAGE {
-            self.paint_header(&mut g, content);
+            self.paint_header(&mut g, content, TOP_H);
             self.paint_usage(&mut g, content, lh, &mut hits);
         } else if self.page == PAGE_SETTINGS {
-            self.paint_header(&mut g, content);
-            self.paint_settings(&mut g, content, &mut hits);
+            self.paint_settings(&mut g, content, lh, &mut hits);
+            // The rows scroll under the title, and what is under it can't be clicked.
+            self.paint_header(&mut g, content, SETTINGS_TOP - 4.0);
+            hits.retain(|h| h.rect.1 >= SETTINGS_TOP - 4.0);
         } else {
             self.paint_grid(&mut g, content, lh, &mut hits);
-            self.paint_header(&mut g, content);
+            self.paint_header(&mut g, content, TOP_H);
             self.paint_top(&mut g, content, &mut hits);
         }
         hits.iter_mut().for_each(|h: &mut Hit| h.rect.0 += SIDEBAR_W);
@@ -504,8 +511,9 @@ impl Picker {
         g.label(18.0, lh - 32.0, SIDEBAR_W - 30.0, 20.0, &using, Font::Normal, p.ink);
     }
 
-    fn paint_header(&mut self, g: &mut Gfx, lw: f32) {
-        g.page_rect(0.0, 0.0, lw, TOP_H);
+    /// The page's title, on a band `h` tall that hides whatever scrolled under it.
+    fn paint_header(&mut self, g: &mut Gfx, lw: f32, h: f32) {
+        g.page_rect(0.0, 0.0, lw, h);
         let title = [t("Nhân vật", "Characters"), t("Mức dùng", "Usage"), t("Cài đặt", "Settings")][self.page.min(2) as usize];
         g.label(16.0, 10.0, lw - 32.0, 44.0, title, Font::Display, pal().ink);
     }
@@ -616,11 +624,12 @@ impl Picker {
     }
 
     /// Windows Settings' card rows: what it is on the left, the control on the right.
-    fn paint_settings(&mut self, g: &mut Gfx, lw: f32, hits: &mut Vec<Hit>) {
+    fn paint_settings(&mut self, g: &mut Gfx, lw: f32, lh: f32, hits: &mut Vec<Hit>) {
         let s = self.settings;
         let hover = self.hover.clone();
         let (x, w) = (16.0, lw - 32.0);
-        let mut y = 60.0;
+        self.settings_scroll = self.settings_scroll.clamp(0.0, self.settings_max);
+        let mut y = SETTINGS_TOP - self.settings_scroll;
         let row = |g: &mut Gfx, icon: &str, title: &str, desc: &str, y0: &mut f32| {
             let p = pal();
             g.rrect(x, *y0, w, 60.0, 8.0, p.surface);
@@ -632,7 +641,12 @@ impl Picker {
             *y0 - 64.0
         };
         let update_note = crate::tf!("Đang ở bản {}. Không cài khi cửa sổ này đang mở", "On version {}. Doesn't install while this window is open", env!("CARGO_PKG_VERSION"));
-        let toggles: [(&str, &str, &str, bool, Setting); 7] = [
+        let keys = s.skill_keys.map(|k| if k == 0 { "-".to_string() } else { (k as char).to_string() }).join("/");
+        let skills = crate::tf!(
+            "Phân thân khi làm lâu, dịch chuyển khi xong hoặc cần bạn. Phím Ctrl+{keys}, đổi trong config.json",
+            "Clones on long work, a teleport when done or needed. Keys Ctrl+{keys}, set in config.json"
+        );
+        let toggles: [(&str, &str, &str, bool, Setting); 8] = [
             (ICON_PLUG, t("Kết nối Claude Code", "Connect to Claude Code"), if s.hooks { t("Đang nhận trạng thái từ các phiên mới", "Receiving status from new sessions") } else { t("Chưa kết nối: buddy không biết Claude đang làm gì", "Not connected: Buddy can't tell what Claude is doing") }, s.hooks, Setting::Hooks),
             (ICON_HIDE, t("Tự ẩn khi toàn màn hình", "Hide during full screen"), t("Ẩn khi trình chiếu, xem phim hay chơi game, rồi tự hiện lại", "Hides for presentations, movies and games, then comes back"), s.auto_hide, Setting::AutoHide),
             (ICON_SOUND, t("Âm báo", "Sounds"), t("Khi Claude xong việc, cần bạn hoặc gặp lỗi", "When Claude finishes, needs you or hits an error"), s.sound, Setting::Sound),
@@ -640,9 +654,10 @@ impl Picker {
             (ICON_POWER, if cfg!(windows) { t("Khởi động cùng Windows", "Start with Windows") } else { t("Mở khi đăng nhập", "Open at login") }, t("Mở Claude Buddy khi đăng nhập", "Open Claude Buddy when you sign in"), s.autostart, Setting::Autostart),
             (ICON_UPDATE, t("Tự động cập nhật", "Update automatically"), &update_note, s.auto_update, Setting::AutoUpdate),
             (ICON_TRANSLUCENT, t("Hiệu ứng trong mờ", "Transparency effects"), t("Nền cửa sổ trong mờ theo Windows; tự tắt khi Windows tắt Transparency effects", "See-through window backgrounds; turns off when Windows turns off transparency effects"), s.translucent, Setting::Translucent),
+            (ICON_GENERATE, t("Tự dùng skill theo phiên", "Skills follow the sessions"), &skills, s.auto_skills, Setting::AutoSkills),
         ];
-        // Pages are solid on a Mac, so there is nothing for this one to change.
-        for (icon, title, desc, on, setting) in toggles.into_iter().filter(|x| cfg!(windows) || x.4 != Setting::Translucent) {
+        // Pages are solid on a Mac, so there is nothing for this one to change; nor skills there yet.
+        for (icon, title, desc, on, setting) in toggles.into_iter().filter(|x| cfg!(windows) || !matches!(x.4, Setting::Translucent | Setting::AutoSkills)) {
             let ry = row(g, icon, title, desc, &mut y);
             g.toggle(x + w - 62.0, ry + 20.0, on, Action::Set(setting), &hover, hits);
         }
@@ -652,7 +667,7 @@ impl Picker {
         for (i, l) in labels.iter().enumerate() {
             cx = g.chip(cx, ry + 16.0, l, s.language == i as u8, Action::Set(Setting::Language(i as u8)), &hover, hits) + 4.0;
         }
-        let ry = row(g, ICON_RESIZE, t("Kích thước nhân vật", "Character size"), if cfg!(windows) { t("Hoặc lăn chuột trên nhân vật; trỏ vào nhân vật: Ctrl+Q/W/R (ở nơi khác thêm Alt)", "Or scroll on the character; pointing at it: Ctrl+Q/W/R (elsewhere add Alt)") } else { t("Nhân vật càng nhỏ càng ít che màn hình", "A smaller character covers less of your screen") }, &mut y);
+        let ry = row(g, ICON_RESIZE, t("Kích thước nhân vật", "Character size"), if cfg!(windows) { t("Hoặc lăn chuột trên nhân vật", "Or scroll on the character") } else { t("Nhân vật càng nhỏ càng ít che màn hình", "A smaller character covers less of your screen") }, &mut y);
         let labels = [t("Nhỏ", "Small"), t("Vừa", "Medium"), t("Lớn", "Large")];
         let mut cx = x + w - 16.0 - labels.iter().map(|l| g.chip_w(l) + 4.0).sum::<f32>();
         for (i, l) in labels.iter().enumerate() {
@@ -664,6 +679,13 @@ impl Picker {
         let ry = row(g, ICON_FOLDER, t("Thư mục nhân vật", "Character folder"), t("Nhân vật bạn thêm được lưu ở đây", "Characters you add are stored here"), &mut y);
         let bw = g.button_w(None, t("Mở thư mục", "Open folder"));
         g.button(x + w - 16.0 - bw, ry + 14.0, None, t("Mở thư mục", "Open folder"), Style::Normal, true, Action::Set(Setting::Folder), &hover, hits);
+        // Too many rows for the window: they scroll, with the same thin marker as the character grid.
+        let (content, view) = (y + self.settings_scroll - SETTINGS_TOP, lh - SETTINGS_TOP - 8.0);
+        self.settings_max = (content - view).max(0.0);
+        if self.settings_max > 0.0 {
+            let th = (view * view / content).max(24.0);
+            g.rrect(lw - 7.0, SETTINGS_TOP + self.settings_scroll / self.settings_max * (view - th), 3.0, th, 1.5, pal().muted);
+        }
     }
 
     fn paint_top(&mut self, g: &mut Gfx, lw: f32, hits: &mut Vec<Hit>) {
@@ -1474,6 +1496,8 @@ impl Picker {
 const TOP_H: f32 = 412.0;
 const HERO_H: f32 = 300.0;
 const GRID_TOP: f32 = 412.0;
+/// Where the settings rows start, below the page title.
+const SETTINGS_TOP: f32 = 60.0;
 const GRID_GAP: f32 = 12.0;
 const CARD_W: f32 = 136.0;
 const CARD_H: f32 = 156.0;
@@ -2224,6 +2248,9 @@ pub(crate) fn wheel(notches: f32) {
         if p.dialog.is_none() && p.generating.is_none() && p.page == 0 {
             p.scroll -= notches * 60.0;
             p.clamp_scroll();
+            p.invalidate();
+        } else if p.dialog.is_none() && p.page == PAGE_SETTINGS && p.settings_max > 0.0 {
+            p.settings_scroll = (p.settings_scroll - notches * 60.0).clamp(0.0, p.settings_max);
             p.invalidate();
         }
     });

@@ -96,7 +96,7 @@ Lệnh này xoá app, mục mở khi đăng nhập và hook. Cài đặt, số l
 | Bấm một dòng phiên | Mở cửa sổ terminal/IDE của phiên đó |
 | Kéo nhân vật | Tới bất kỳ đâu trên màn hình; vị trí được ghi nhớ |
 | Lăn chuột trên nhân vật (Windows) | Phóng to hoặc thu nhỏ, tối đa 60% màn hình |
-| Trỏ vào nhân vật rồi bấm Ctrl+Q / Ctrl+W / Ctrl+R (Windows) | Skill: dịch chuyển sang góc khác / phân thân ở các góc / cỡ lớn nhất và quay lại. Ở nơi khác thì thêm Alt (Ctrl+Alt+Q…). Sau mỗi skill, phím Ctrl vẫn thuộc về buddy thêm 4 giây, nên bấm tiếp không cần trỏ lại |
+| Trỏ vào nhân vật rồi bấm Ctrl+Q / Ctrl+W / Ctrl+R (Windows) | Skill: dịch chuyển sang góc khác / phân thân ở các góc / cỡ lớn nhất và quay lại. Ở nơi khác thì thêm Alt (Ctrl+Alt+Q…). Sau mỗi skill, phím Ctrl vẫn thuộc về buddy thêm 4 giây, nên bấm tiếp không cần trỏ lại. Đổi phím: mục `skillKeys` ở phần Cấu hình |
 | Chuột phải nhân vật hoặc icon khay | Menu nhanh |
 | Bấm icon khay (Windows) | Mở cửa sổ chính (Nhân vật, Mức dùng, Cài đặt) |
 | Bấm icon thanh menu (macOS) | Menu nhanh, mở cửa sổ chính bằng **Quản lý nhân vật**, **Xem mức dùng** và **Cài đặt** |
@@ -182,6 +182,9 @@ trong menu chuột phải (**Tự dùng skill theo phiên**).
 `config.json` trong `%APPDATA%\claude-buddy-rs` trên Windows hoặc `~/Library/Application Support/claude-buddy-rs` trên
 macOS, mục `port` (mặc định 47329). Đổi cổng thì cần kết nối lại Claude Code.
 Trên Windows, mục `autoCloneSeconds` (mặc định 20) là số giây các phiên làm việc trước khi phân thân xuất hiện.
+Mục `skillKeys` đặt phím cho từng skill, mỗi skill một chữ hoặc một số, `""` là không dùng phím:
+`{"blink": "Q", "clones": "W", "ultimate": "R"}`. Ctrl và Ctrl+Alt giữ nguyên; sửa xong thì mở lại app.
+Công tắc tự dùng skill cũng có trong trang **Cài đặt**.
 
 ## API cục bộ
 

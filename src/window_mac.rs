@@ -970,6 +970,7 @@ pub fn settings_view() -> Option<SettingsView> {
             "en" => 2,
             _ => 0,
         },
+        ..Default::default()
     })
 }
 
@@ -1016,6 +1017,8 @@ pub fn apply_setting(s: Setting) {
             theme::set_translucent(a.config.translucent);
             a.repaint_if_shown();
         }
+        // No skills on the Mac yet, so the settings page doesn't offer this.
+        Setting::AutoSkills => {}
         Setting::Language(n) => {
             a.config.language = ["auto", "vi", "en"][n.min(2) as usize].into();
             a.config.save();

@@ -103,7 +103,7 @@ This removes the app, its login item and its hooks. Settings, usage data and add
 | Click a session row | Opens that session's terminal or IDE window |
 | Drag the character | Anywhere on the screen; the position is remembered |
 | Scroll on the character (Windows) | Makes it bigger or smaller, up to 60% of the screen |
-| Point at the character, then Ctrl+Q / Ctrl+W / Ctrl+R (Windows) | Skills: teleport to another corner / shadow clones in the corners / biggest size and back. Anywhere else, add Alt (Ctrl+Alt+Q…). After a skill, the Ctrl keys stay with the buddy for 4 seconds, so the next one needs no pointing |
+| Point at the character, then Ctrl+Q / Ctrl+W / Ctrl+R (Windows) | Skills: teleport to another corner / shadow clones in the corners / biggest size and back. Anywhere else, add Alt (Ctrl+Alt+Q…). After a skill, the Ctrl keys stay with the buddy for 4 seconds, so the next one needs no pointing. Other keys: `skillKeys` under Configuration |
 | Right-click the character or tray icon | Quick menu |
 | Click the tray icon (Windows) | Opens the main window (Characters, Usage, Settings) |
 | Click the menu bar icon (macOS) | Quick menu, with the main window under **Manage characters**, **View usage** and **Settings** |
@@ -195,6 +195,9 @@ from the right-click menu (**Skills follow the sessions**).
 `config.json` in `%APPDATA%\claude-buddy-rs` on Windows or `~/Library/Application Support/claude-buddy-rs` on macOS, key
 `port` (default 47329). After changing the port, reconnect to Claude Code.
 On Windows, `autoCloneSeconds` (default 20) sets how long sessions work before the shadow clones come out.
+`skillKeys` sets the skills' keys, one letter or digit each, `""` for none:
+`{"blink": "Q", "clones": "W", "ultimate": "R"}`. Ctrl and Ctrl+Alt stay as they are; restart the app after a change.
+The skills switch is also under **Settings**.
 
 ## Local API
 

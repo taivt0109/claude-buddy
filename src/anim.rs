@@ -10,7 +10,7 @@ use crate::render;
 use crate::store::State;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::UNIX_EPOCH;
 use tiny_skia::{PixmapMut, Transform};
 #[cfg(windows)]
@@ -606,12 +606,33 @@ pub fn prepare_main(args: &[String]) -> i32 {
 
 /// Prepared frames of a character, from the cache when possible. Waits for a helper process on a
 /// miss: worker threads only.
+/// The same file asked for again while its helper runs (a character clicked again while it loads)
+/// waits for that helper instead of starting another one beside it.
 pub fn load(c: &Character, max_w: f32, max_h: f32, dpi: f32) -> Result<Arc<CharAnim>, String> {
     let file = cache_file(c, max_w, max_h, dpi);
     let open = || map_file(&file).and_then(|m| parse(Bytes::Mapped(m)));
     if let Some(a) = open() {
         return Ok(Arc::new(a));
     }
+    let _busy = loop {
+        let mut busy = PREPARING.lock().unwrap_or_else(|e| e.into_inner());
+        if !busy.contains(&file) {
+            // A helper that finished just now has left the file behind.
+            if let Some(a) = open() {
+                return Ok(Arc::new(a));
+            }
+            busy.push(file.clone());
+            break Preparing(file.clone());
+        }
+        while busy.contains(&file) {
+            busy = PREPARED.wait(busy).unwrap_or_else(|e| e.into_inner());
+        }
+        drop(busy);
+        // Ready now, unless that helper failed: then this one tries for itself.
+        if let Some(a) = open() {
+            return Ok(Arc::new(a));
+        }
+    };
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let out = std::process::Command::new(exe)
         .args(["--prepare", &c.id, &max_w.to_string(), &max_h.to_string(), &dpi.to_string()])
@@ -621,6 +642,20 @@ pub fn load(c: &Character, max_w: f32, max_h: f32, dpi: f32) -> Result<Arc<CharA
         return Err(String::from_utf8_lossy(&out.stderr).into_owned());
     }
     open().map(Arc::new).ok_or_else(|| t("không đọc được file đã chuẩn bị", "could not read the prepared file").to_string())
+}
+
+/// Cache files a helper process of this app is writing now.
+static PREPARING: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+static PREPARED: Condvar = Condvar::new();
+
+/// Marks a file as being prepared until dropped, however the helper ends.
+struct Preparing(PathBuf);
+
+impl Drop for Preparing {
+    fn drop(&mut self) {
+        PREPARING.lock().unwrap_or_else(|e| e.into_inner()).retain(|f| *f != self.0);
+        PREPARED.notify_all();
+    }
 }
 
 /// The pixel density at which a media character's frames hold one source pixel each, judged from the
